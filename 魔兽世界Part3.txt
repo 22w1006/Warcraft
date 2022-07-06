@@ -1,0 +1,588 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include<cstdio>
+#include<cstdlib>
+#include<cstring>
+#include<algorithm>
+#include<cmath>
+#include<iostream>
+using namespace std;
+
+#define max_name_len 8
+#define max_weapon_num 10
+#define total_camp_num 2
+#define total_warrior_num 5
+#define total_weapon_num 3
+#define max_warrior_num 20
+
+//总生命元、城市数量、lion走一步掉多少royalty、截止时间/min
+int M, N, K, T;
+int hour;
+int flag = 0;//1表示游戏结束
+
+
+//类的声明
+class CommonProperties;
+class Weapon;
+class Sword;
+class Bomb;
+class Arrow;
+class Warrior;
+class Dragon;
+class Ninja;
+class Iceman;
+class Lion;
+class Wolf;
+class Camp;
+
+//0=sword 1=bomb 2=arrow 
+//0=iceman 1=lion 2=wolf 3=ninja 4=dragon
+//0=red 1=blue
+//公有性质
+class CommonProperties {//公有性质：类型数和名字
+public:
+	const int type;
+	const char* name;
+	CommonProperties(const int n, const char s[max_name_len + 1]) :
+		type(n),
+		name(s)
+	{}
+	virtual ~CommonProperties() {};
+	const char* getname() { return name; }
+	virtual int gettype() { return type; }
+};
+
+//武器
+class Weapon :public CommonProperties {
+public:
+	int used_num;
+	Weapon(const int t, const char s[max_name_len + 1]) :
+		CommonProperties(t, s),
+		used_num(0)
+	{}
+	virtual ~Weapon() {};
+	const int getused_num() { return used_num; }
+	virtual void attack(Warrior* att, Warrior* def) = 0;
+	friend bool cmp(Weapon* x, Weapon* y);
+	friend bool cmp_wolf(Weapon* x, Weapon* y);
+	virtual bool is_destroyed() = 0;
+	virtual int gettype() { return type; }
+};
+bool cmp(Weapon* x, Weapon* y) {
+	if (x->gettype() < y->gettype()) return true; //type_num小的排在前面
+	else if (x->gettype() > y->gettype()) return false;
+	else {
+		if (x->used_num > y->used_num) return true;//一样的话used_num大的排在前面
+		else return false;
+	}
+}
+bool cmp_wolf(Weapon* x, Weapon* y) {
+	if (x->gettype() < y->gettype()) return true; //type_num小的排在前面
+	else if (x->gettype() > y->gettype()) return false;
+	else {
+		if (x->used_num < y->used_num) return true;//一样的话used_num小的排在前面
+		else return false;
+	}
+}
+class Sword :public Weapon {
+public:
+	static constexpr char Myname[max_name_len + 1] = "sword";
+	Sword() :
+		Weapon(0, Myname)
+	{}
+	virtual void attack(Warrior* att, Warrior* def);
+	virtual bool is_destroyed() { return false; }
+};
+class Bomb :public Weapon {
+public:
+	static constexpr char Myname[max_name_len + 1] = "bomb";
+	Bomb() :
+		Weapon(1, Myname)
+	{}
+	virtual void attack(Warrior* att, Warrior* def);
+	virtual bool is_destroyed() {
+		if (used_num > 0) return true;
+		else return false;
+	}
+};
+class Arrow :public Weapon {
+public:
+	static constexpr char Myname[max_name_len + 1] = "arrow";
+	Arrow() :
+		Weapon(2, Myname)
+	{}
+	virtual void attack(Warrior* att, Warrior* def);
+	virtual bool is_destroyed() {
+		if (used_num >= 2) return true;
+		else return false;
+	}
+};
+
+//武士
+class Warrior :public CommonProperties {
+public:
+	int id, place, element, force, weapon_num = 0, loyalty = -1, lastmove = -1;
+	static int warrior_element[total_warrior_num], warrior_force[total_warrior_num];
+	char out[20];
+	Camp* belong;
+	Weapon* cur_weapon;//指针指向现在使用的武器
+	Weapon* weapons[max_weapon_num];//指针数组存放武器
+	Warrior(int i, const int t, const char name[max_name_len + 1], Camp* cp);
+	virtual ~Warrior() { delete[]weapons; }
+	virtual bool dead() {//是否死亡
+		if (element > 0) return false;
+		else return true;
+	}
+	virtual void proceed();//前进
+	virtual void grab_weapon(Warrior* w) {};//抢夺武器
+	virtual void repo_situation() {//汇报持有武器情况
+		int w[total_weapon_num] = { 0 };
+		for (int i = 0; i < weapon_num; ++i) {
+			switch (weapons[i]->gettype()) {
+			case 0: w[0]++; break;
+			case 1: w[1]++; break;
+			case 2: w[2]++; break;
+			}
+		}
+		printf("%03d:55 %s has %d sword %d bomb %d arrow and %d elements\n", hour, out, w[0], w[1], w[2], element);
+	}
+	virtual void repo_location() {//汇报所在位置
+		if (place == 0) {
+			printf("%03d:10 %s reached red headquarter with %d elements and force %d\n", hour, out, element, force);
+			printf("%03d:10 red headquarter was taken\n", hour);
+			flag = 1;
+		}
+		else if (place == N + 1) {
+			printf("%03d:10 %s reached blue headquarter with %d elements and force %d\n", hour, out, element, force);
+			printf("%03d:10 blue headquarter was taken\n", hour);
+			flag = 1;
+		}
+		else {
+			printf("%03d:10 %s marched to city %d with %d elements and force %d\n", hour, out, place, element, force);
+		}
+	}
+	void hurt(int d) {//掉血
+		element -= d;
+	}
+	virtual void get_weapon(Warrior* w);//从死人身上搜到武器
+	virtual void birth_weapon(int typenum) {//出生获得typenum的武器
+		switch (typenum) {
+		case 0:
+			weapons[weapon_num] = new Sword(); break;
+		case 1:
+			weapons[weapon_num] = new Bomb(); break;
+		case 2:
+			weapons[weapon_num] = new Arrow(); break;
+		}
+		weapon_num++;
+	}
+	virtual void battle(Warrior* w);//战斗
+	virtual bool run() { return false; }//lion逃跑
+	virtual void cheer() { return; }//dragon欢呼
+};
+class Iceman :public Warrior {
+public:
+	static constexpr char Myname[max_name_len + 1] = "iceman";
+	Iceman(int i, Camp* cp) :
+		Warrior(i, 0, Myname, cp) {
+		birth_weapon(i % 3);
+	}
+	virtual void proceed() {//掉血前进
+		Warrior::proceed();
+		hurt(element / 10);
+	}
+};
+class Lion :public Warrior {
+public:
+	static constexpr char Myname[max_name_len + 1] = "lion";
+	virtual void proceed() {
+		Warrior::proceed();
+		loyalty -= K;
+	}
+	virtual bool run() {
+		if (loyalty <= 0) {
+			printf("%03d:05 %s ran away\n", hour, out);
+			return true;
+		}
+		else return false;
+	}
+	Lion(int i, Camp* cp);
+};
+class Wolf :public Warrior {
+public:
+	static constexpr char Myname[max_name_len + 1] = "wolf";
+	virtual void grab_weapon(Warrior* w) {
+		if (w->weapon_num == 0) return;
+		sort(w->weapons, w->weapons + w->weapon_num, cmp_wolf);
+		int i, take;
+		for (i = 1; i < w->weapon_num; ++i) {
+			if (w->weapons[i]->getname() != w->weapons[0]->getname()) break;
+		}
+		take = min(i, max_weapon_num - weapon_num);
+		printf("%03d:35 %s took %d %s from %s in city %d\n", hour, out, take, w->weapons[0]->getname(), w->out, place);
+		for (int j = 0; j < take; ++j) {
+			weapons[weapon_num + j] = w->weapons[j];
+		}
+		for (int j = 0; j < w->weapon_num - take; ++j) {
+			w->weapons[j] = w->weapons[j + take];
+			//能不能加一行:
+			//w->weapons[j + take] = NULL;
+		}
+		weapon_num += take;
+		w->weapon_num -= take;
+		return;
+	}
+	Wolf(int i, Camp* cp) :
+		Warrior(i, 2, Myname, cp)
+	{}
+};
+class Ninja :public Warrior {
+public:
+	static constexpr char Myname[max_name_len + 1] = "ninja";
+	Ninja(int i, Camp* cp) :
+		Warrior(i, 3, Myname, cp){
+		birth_weapon(i % 3);
+		birth_weapon((i + 1) % 3);
+	}
+};
+class Dragon :public Warrior {
+public:
+	static constexpr char Myname[max_name_len + 1] = "dragon";
+	virtual void cheer() {
+		printf("%03d:40 %s yelled in city %d\n", hour, out, place);
+		return;
+	}
+	Dragon(int i, Camp* cp) :
+		Warrior(i, 4, Myname, cp){
+		birth_weapon(i % 3);
+	}
+};
+
+//大本营
+class Camp :public CommonProperties {
+public:
+	char Myname[total_camp_num][max_name_len + 1] = { "red","blue" };
+	static constexpr int produce_order[total_camp_num][total_warrior_num] = { {0,1,2,3,4},{1,4,3,0,2} };
+	bool terminal;//是否结束造兵
+	int element, total_num;//生命元，id（总共多少兵，兵的编号）
+	Warrior* cur_warrior, * warriors[max_warrior_num] = {};
+	Camp(int t, int e) :
+		CommonProperties(t, Myname[t]),
+		element(e),
+		terminal(false),
+		total_num(0)
+	{}
+	virtual ~Camp() {
+		for (int i = 0; i < total_num; ++i) {
+			//delete warriors[i];
+		}
+	}
+	void produce() {
+		if (terminal) return;
+		//cout << Warrior::warrior_element[produce_order[type][total_num % 5]] << endl;
+		//cout << element << endl;
+		if (Warrior::warrior_element[produce_order[type][total_num % 5]] <= element) {
+			element -= Warrior::warrior_element[produce_order[type][total_num % 5]];//兵营掉血
+			switch (produce_order[type][total_num % 5]) {//造兵
+			case 0:
+				warriors[total_num] = new Iceman(total_num + 1, this); break;
+			case 1:
+				warriors[total_num] = new Lion(total_num + 1, this); break;
+			case 2:
+				warriors[total_num] = new Wolf(total_num + 1, this); break;
+			case 3:
+				warriors[total_num] = new Ninja(total_num + 1, this); break;
+			case 4:
+				warriors[total_num] = new Dragon(total_num + 1, this); break;
+			}
+			cur_warrior = warriors[total_num];
+			printf("%03d:00 %s born\n", hour, cur_warrior->out);
+			if (produce_order[type][total_num % 5] == 1) {
+				printf("Its loyalty is %d\n", cur_warrior->loyalty);
+			}
+			total_num++;
+		}
+		else { terminal = true; }//不能造，就停止
+		return;
+	}
+	Warrior* find_warrior(int p) { //给定warrior的位置，返回warrior的指针
+		for (int i = 0; i < total_num; i++) {
+			if (warriors[i] && warriors[i]->place == p) return warriors[i];
+		}
+		return NULL;
+	}
+	void killwarrior(int p) {//杀掉位于给定位置的warrior
+		for (int i = 0; i < total_num; ++i) {
+			if (warriors[i] && warriors[i]->place == p) {
+				//cout << p << endl<<warriors[i];
+				warriors[i] = NULL;
+			}
+		}
+		return;
+	}
+	void repo() { printf("%03d:50 %d elements in %s headquarter\n", hour, element, getname()); }
+};
+
+//类外声明
+constexpr char Sword::Myname[max_name_len + 1];
+constexpr char Bomb::Myname[max_name_len + 1];
+constexpr char Arrow::Myname[max_name_len + 1];
+constexpr char Iceman::Myname[max_name_len + 1];
+constexpr char Lion::Myname[max_name_len + 1];
+constexpr char Wolf::Myname[max_name_len + 1];
+constexpr char Ninja::Myname[max_name_len + 1];
+constexpr char Dragon::Myname[max_name_len + 1];
+constexpr int Camp::produce_order[total_camp_num][total_warrior_num];
+int Warrior::warrior_force[total_warrior_num];
+int Warrior::warrior_element[total_warrior_num];
+
+void Sword::attack(Warrior* att, Warrior* def) {
+	used_num++;
+	def->hurt(att->force * 2 / 10);
+}
+void Bomb::attack(Warrior* att, Warrior* def) {
+	def->hurt(att->force * 4 / 10);
+	used_num++;
+	if (att->type != 3) { att->hurt((att->force * 4 / 10) / 2); }//自己掉血
+}
+void Arrow::attack(Warrior* att, Warrior* def) {
+	def->hurt(att->force * 3 / 10);
+	used_num++;
+}
+
+void useweapon(Warrior* me, Warrior* enemy, int& flag, int& cur_weapon) { //me对enemy使用武器
+	int last_ele1 = me->element, last_ele2 = enemy->element;//记录战斗前的血，防止打完两人都不掉血
+	flag++;
+	if (me->weapon_num == 0) return;
+	cur_weapon = (cur_weapon + 1) % me->weapon_num;
+	me->weapons[cur_weapon]->attack(me, enemy);//用me的编号为cur_weapon的武器打一下enemy
+	if (me->weapons[cur_weapon]->is_destroyed()) {//如果损坏，删掉，不结束
+		delete me->weapons[cur_weapon];
+		for (int i = cur_weapon; i < me->weapon_num - 1; ++i) {
+			me->weapons[i] = me->weapons[i + 1];
+		}
+		cur_weapon--;
+		me->weapon_num--;
+		flag = 0;
+	}
+	if (me->element != last_ele1 || enemy->element != last_ele2) { //有一方血量变动，就不结束
+		flag = 0;
+	}
+}
+
+Warrior::Warrior(int i, const int t, const char name[max_name_len + 1], Camp* cp) :
+	id(i),
+	belong(cp),
+	element(warrior_element[t]),
+	force(warrior_force[t]),
+	CommonProperties(t, name) {
+	if (belong->gettype() == 0) place = 0;
+	else place = N + 1;
+	sprintf(out, "%s %s %d", belong->getname(), name, id);//输出模板，例如"red lion 3"
+}
+void Warrior::proceed() {
+	if (lastmove == hour) return;
+	else {
+		lastmove = hour;
+		if (belong->gettype() == 0) place++;
+		else place--;
+	}
+	return;
+}
+void Warrior::battle(Warrior* w) {
+	//先排好武器顺序
+	sort(weapons, weapons + weapon_num, cmp);
+	sort(w->weapons, w->weapons + w->weapon_num, cmp);
+	int flag1 = 0, flag2 = 0, cur_weapon1 = -1, cur_weapon2 = -1;
+	while (flag1 <= weapon_num || flag2 <= w->weapon_num) {//有一方武器没有用完，继续打
+		//cout << flag1 << ' ' << flag2 << endl;
+		useweapon(this, w, flag1, cur_weapon1);
+		if (dead()) {
+			if (w->dead()) return;
+			else {
+				w->get_weapon(this); return;
+			}
+		}
+		else {
+			if (w->dead()) {
+				get_weapon(w); return;
+			}
+			else {}
+		}
+		useweapon(w, this, flag2, cur_weapon2);
+		if (dead()) {
+			if (w->dead()) return;
+			else {
+				w->get_weapon(this); return;
+			}
+		}
+		else {
+			if (w->dead()) {
+				get_weapon(w); return;
+			}
+			else {}
+		}
+	}
+}
+void Warrior::get_weapon(Warrior* w) {
+	sort(w->weapons, w->weapons + w->weapon_num, cmp_wolf);
+	int take;
+	take = min(max_weapon_num - weapon_num, w->weapon_num);
+	for (int i = 0; i < take; ++i) {
+		weapons[weapon_num + i] = w->weapons[i];
+	}
+	for (int j = 0; j < w->weapon_num - take; ++j) {
+		w->weapons[j] = w->weapons[j + take];
+	}
+	weapon_num += take;
+	w->weapon_num -= take;
+}
+Lion::Lion(int i, Camp* cp) :
+	Warrior(i, 1, Myname, cp) {
+	loyalty = cp->element;
+	birth_weapon(i % 3);
+}
+
+int main() {
+	int test_num = 0;
+	Warrior* w1, * w2;//俩指针，分别指向要操作（可能要打架）的warrior
+	cin >> test_num;
+	for (int t_ = 0; t_ < test_num; ++t_) {
+		//初始化，得到输入
+		cin >> M >> N >> K >> T;
+		int d_, n_, i_, l_, w_;
+		cin >> d_ >> n_ >> i_ >> l_ >> w_;
+		Warrior::warrior_element[0] = i_;
+		Warrior::warrior_element[1] = l_;
+		Warrior::warrior_element[2] = w_;
+		Warrior::warrior_element[3] = n_;
+		Warrior::warrior_element[4] = d_;
+		int d__, n__, i__, l__, w__;
+		cin >> d__ >> n__ >> i__ >> l__ >> w__;
+		Warrior::warrior_force[0] = i__;
+		Warrior::warrior_force[1] = l__;
+		Warrior::warrior_force[2] = w__;
+		Warrior::warrior_force[3] = n__;
+		Warrior::warrior_force[4] = d__;
+		printf("Case %d:\n", t_ + 1);
+		Camp red(0, M), blue(1, M);//创建兵营
+		hour = 0;//时间
+		while (true) {
+			//00::造兵
+			if (hour * 60 > T) break;
+			red.produce();
+			blue.produce();
+
+			//05::lion逃跑
+			if (hour * 60 + 5 > T) break;
+			for (int i = 0; i <= N + 1; ++i) {
+				w1 = red.find_warrior(i);
+				if (w1 && w1->type == 1) {
+					if (w1->run()) red.killwarrior(i);
+				}
+				w2 = blue.find_warrior(i);
+				if (w2 && w2->type == 1) {
+					if (w2->run()) blue.killwarrior(i);
+				}
+			}
+
+			//10::前进
+			flag = 0;
+			if (hour * 60 + 10 > T) break;
+			w2 = blue.find_warrior(1);
+			if (w2 && w2->lastmove != hour) {
+				w2->proceed(); w2->repo_location();
+			}
+			for (int i = 1; i <= N; ++i) {
+				w1 = red.find_warrior(i - 1);
+				if (w1 && w1->lastmove != hour) {
+					w1->proceed(); w1->repo_location();
+				}
+				w2 = blue.find_warrior(i + 1);
+				if (w2 && w2->lastmove != hour) {
+					w2->proceed(); w2->repo_location();
+				}
+			}
+			w1 = red.find_warrior(N);
+			if (w1 && w1->lastmove != hour) {
+				w1->proceed(); w1->repo_location();
+			}
+			if (flag == 1) break;//游戏结束
+
+			//35::wolf抢武器
+			if (hour * 60 + 35 > T) break;
+			for (int i = 1; i <= N; ++i) {
+				w1 = red.find_warrior(i);
+				w2 = blue.find_warrior(i);
+				if (w1 && w2) {
+					if (w1->type == 2 && w2->type == 2) continue;//同是wolf无事发生
+					else {
+						if (w1->type == 2) w1->grab_weapon(w2);
+						if (w2->type == 2) w2->grab_weapon(w1);
+					}
+				}
+			}
+
+			//40::开战
+			if (hour * 60 + 40 > T) break;
+			for (int i = 1; i <= N; ++i) {
+				//cout << "start" << endl;
+				w1 = red.find_warrior(i);
+				w2 = blue.find_warrior(i);
+				if (w1 && w2) {
+					if (i % 2 == 1) {
+						//cout << w1->out << ' ' << w2->out << endl;
+						w1->battle(w2);
+					}
+					else {
+						w2->battle(w1);
+					}
+					//汇报情况
+					if (w1->dead()) {
+						if (w2->dead()) { printf("%03d:40 both %s and %s died in city %d\n", hour, w1->out, w2->out, i); }
+						else { printf("%03d:40 %s killed %s in city %d remaining %d elements\n", hour, w2->out, w1->out, i, w2->element); }
+					}
+					else {
+						if (w2->dead()) { printf("%03d:40 %s killed %s in city %d remaining %d elements\n", hour, w1->out, w2->out, i, w1->element); }
+						else { printf("%03d:40 both %s and %s were alive in city %d\n", hour, w1->out, w2->out, i); }
+					}
+					//清掉死人
+					if (w1->dead()) {
+						red.killwarrior(i);
+					}
+					else {
+						w1->cheer();
+					}
+					if (w2->dead()) {
+						blue.killwarrior(i);
+					}
+					else {
+						w2->cheer();
+					}
+					
+				}
+				//cout << 2;
+			}
+			//50::兵营汇报elements0
+			if (hour * 60 + 50 > T) break;
+			red.repo();
+			blue.repo();
+
+			//55::warrior自己汇报情况
+			if (hour * 60 + 55 > T) break;
+			for (int i = 0; i <= N + 1; ++i) {
+				w1 = red.find_warrior(i);
+				if (w1) {
+					w1->repo_situation();
+				}
+				w2 = blue.find_warrior(i);
+				if (w2) {
+					w2->repo_situation();
+				}
+			}
+
+			//60::循环
+			hour++;
+		}
+	}
+	return 0;
+}
